@@ -1,0 +1,101 @@
+# Se realizan las importaciones necesarias
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+
+# Función para calcular indicadores técnicos
+def calculate_technical_indicators(df, price_col="price"):
+    # SMA (Simple Moving Average) - Media móvil simple (ventana de 20 periodos)
+    df["SMA"] = df[price_col].rolling(window=20).mean()
+
+    # MACD (Moving Average Convergence Divergence)
+    exp1 = df[price_col].ewm(span=12, adjust=False).mean()  # EMA rápida
+    exp2 = df[price_col].ewm(span=26, adjust=False).mean()  # EMA lenta
+    df["MACD"] = exp1 - exp2
+    df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()  # Línea de señal
+
+    # RSI (Relative Strength Index)
+    delta = df[price_col].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df["RSI"] = 100 - (100 / (1 + rs))
+
+    # Bandas de Bollinger (ventana de 20 periodos, 2 desviaciones estándar)
+    df["BB_Middle"] = df[price_col].rolling(window=20).mean()
+    df["BB_Std"] = df[price_col].rolling(window=20).std()
+    df["BB_Upper"] = df["BB_Middle"] + 2 * df["BB_Std"]
+    df["BB_Lower"] = df["BB_Middle"] - 2 * df["BB_Std"]
+
+    return df
+
+# Cargar el archivo de datos
+df = pd.read_csv("five_minute.csv", parse_dates=["time"], index_col="time")
+
+# Calcular los rendimientos logarítmicos
+df["returns"] = np.log(df["price"] / df["price"].shift(1))
+
+# Calcular la dirección del mercado (tres clases: +1, 0, -1)
+df["direction"] = np.sign(df["returns"])
+
+# Verificar la distribución de clases
+print("\nDistribución de clases en 'direction':")
+print(df["direction"].value_counts())
+
+# Calcular indicadores técnicos
+df = calculate_technical_indicators(df)
+
+# Crear cinco predictores de rendimientos rezagados
+lags = 5
+cols = []
+for lag in range(1, lags + 1):
+    col = f"lag{lag}"
+    df[col] = df["returns"].shift(lag)
+    cols.append(col)
+
+# Agregar indicadores técnicos como predictores
+technical_indicators = ["SMA", "MACD", "MACD_Signal", "RSI", "BB_Upper", "BB_Lower"]
+cols.extend(technical_indicators)
+
+# Eliminar filas con valores NaN
+df.dropna(inplace=True)
+
+# Separar los datos en predictores (X) y variable objetivo (y)
+X = df[cols]
+y = df["direction"]
+
+# Escalar los predictores
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Dividir los datos en entrenamiento y prueba (80% entrenamiento, 20% prueba)
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# Entrenar el modelo de regresión logística con pesos balanceados
+lm = LogisticRegression(
+    multi_class="multinomial", solver="lbfgs", max_iter=10000, class_weight="balanced"
+)
+
+# Ajustar el modelo
+lm.fit(X_train, y_train)
+
+# Predecir en el conjunto de prueba
+y_pred = lm.predict(X_test)
+
+# Evaluar el modelo
+print("\nReporte de clasificación (Conjunto de prueba):")
+print(classification_report(y_test, y_pred, zero_division=0))
+print("\nMatriz de confusión (Conjunto de prueba):")
+print(confusion_matrix(y_test, y_pred))
+
+# Opcional: Predecir en el conjunto completo para comparación
+df["pred"] = lm.predict(X_scaled)
+print("\nReporte de clasificación (Conjunto completo):")
+print(classification_report(y, df["pred"], zero_division=0))
+print("\nMatriz de confusión (Conjunto completo):")
+print(confusion_matrix(y, df["pred"]))

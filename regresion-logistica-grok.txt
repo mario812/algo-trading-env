@@ -1,0 +1,50 @@
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix
+
+# Cargar el archivo CSV desde GitHub
+url = "https://raw.githubusercontent.com/mario812/algo-trading-env/rama-pc/five_minute.csv"
+df = pd.read_csv(url)
+
+# Explorar las columnas
+print("Columnas del DataFrame:")
+print(df.columns)
+
+# Calcular rendimientos logarítmicos (usando la columna "close")
+df["returns"] = np.log(df["close"] / df["close"].shift(1))
+
+# Calcular la dirección del mercado (tres clases: +1, -1, 0)
+df["direction"] = np.sign(df["returns"])
+
+# Verificar distribución de clases
+print("\nDistribución de clases en 'direction':")
+print(df["direction"].value_counts())
+
+# Crear cinco predictores (rendimientos rezagados)
+df["lag1"] = df["returns"].shift(1)
+df["lag2"] = df["returns"].shift(2)
+df["lag3"] = df["returns"].shift(3)
+df["lag4"] = df["returns"].shift(4)
+df["lag5"] = df["returns"].shift(5)
+features = ["lag1", "lag2", "lag3", "lag4", "lag5"]
+
+# Eliminar filas con NaN
+df = df.dropna()
+
+# Separar datos
+X = df[features]
+y = df["direction"]
+
+# Entrenar modelo de regresión logística multinomial
+model = LogisticRegression(multi_class="multinomial", solver="lbfgs", max_iter=1000)
+model.fit(X, y)
+
+# Predecir
+df["predicted_direction"] = model.predict(X)
+
+# Evaluar el modelo
+print("\nReporte de clasificación:")
+print(classification_report(y, df["predicted_direction"], zero_division=0))
+print("\nMatriz de confusión:")
+print(confusion_matrix(y, df["predicted_direction"]))
